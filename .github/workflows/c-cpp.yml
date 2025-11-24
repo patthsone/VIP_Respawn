@@ -69,11 +69,11 @@ jobs:
       - name: Package addon into ZIP
         run: |
           cd build/package/addons
-          zip -r "${{ github.event.repository.name }}-v${{ steps.buildnumber.outputs.build_number }}-NovaHost.zip" .
-          mv "${{ github.event.repository.name }}-v${{ steps.buildnumber.outputs.build_number }}-NovaHost.zip" "${GITHUB_WORKSPACE}/"
+          zip -r "${{ github.event.repository.name }}-v${{ steps.buildnumber.outputs.build_number }}-PattHs.zip" .
+          mv "${{ github.event.repository.name }}-v${{ steps.buildnumber.outputs.build_number }}-PattHs.zip" "${GITHUB_WORKSPACE}/"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.buildnumber.outputs.build_number }}
-          files: ${{ github.workspace }}/${{ github.event.repository.name }}-v${{ steps.buildnumber.outputs.build_number }}-NovaHost.zip
+          files: ${{ github.workspace }}/${{ github.event.repository.name }}-v${{ steps.buildnumber.outputs.build_number }}-PattHs.zip
