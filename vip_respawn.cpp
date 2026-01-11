@@ -409,7 +409,7 @@ const char *vip_respawn::GetLogTag()
 
 const char *vip_respawn::GetAuthor()
 {
-	return "PATTHS";
+	return "PattHs and Pisex";
 }
 
 const char *vip_respawn::GetDescription()
@@ -419,7 +419,7 @@ const char *vip_respawn::GetDescription()
 
 const char *vip_respawn::GetName()
 {
-	return "[VIP] Respawn (Addition)";
+	return "[VIP] Respawn";
 }
 
 const char *vip_respawn::GetURL()
