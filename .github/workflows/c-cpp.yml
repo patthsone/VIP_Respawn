@@ -73,7 +73,7 @@ jobs:
           mv "${{ github.event.repository.name }}-v${{ steps.buildnumber.outputs.build_number }}.zip" "${GITHUB_WORKSPACE}/"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v6
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.buildnumber.outputs.build_number }}
           files: ${{ github.workspace }}/${{ github.event.repository.name }}-v${{ steps.buildnumber.outputs.build_number }}.zip
