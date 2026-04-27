@@ -1,3 +1,4 @@
+![GitHub all releases](https://img.shields.io/github/downloads/patthsone/VIP_Respawn/total?style=for-the-badge)
 # [VIP] Respawn (Addition)
 
 Плагин для Counter-Strike 2, предоставляющий расширенные возможности возрождения для VIP игроков.
