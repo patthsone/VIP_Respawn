@@ -18,11 +18,10 @@ CTimer* g_pRespawnTimers[64] = { nullptr };
 CTimer* g_pAutoRespawnTimers[64] = { nullptr };
 CTimer* g_pRespawnDelayTimers[64] = { nullptr };
 CTimer* g_pAutoRespawnDelayTimers[64] = { nullptr };
-CTimer* g_pImmunityTimers[64] = { nullptr }; // для таймеров иммунитета
+CTimer* g_pImmunityTimers[64] = { nullptr };
 
 PLUGIN_EXPOSE(vip_respawn, g_vip_respawn);
 
-// Вспомогательные функции для получения количества игроков в команде
 int GetTeamTotalPlayers(int iTeam)
 {
     int count = 0;
@@ -60,10 +59,8 @@ int GetTeamAlivePlayers(int iTeam)
     return count;
 }
 
-// Функция включения иммунитета на duration секунд
 void GiveImmunity(int iSlot, float duration)
 {
-    // Отменяем предыдущий таймер иммунитета для этого слота
     if (g_pImmunityTimers[iSlot])
     {
         g_pUtils->RemoveTimer(g_pImmunityTimers[iSlot]);
@@ -75,20 +72,15 @@ void GiveImmunity(int iSlot, float duration)
     CCSPlayerPawn* pPawn = pController->m_hPlayerPawn();
     if (!pPawn) return;
 
-    // Включаем иммунитет (запрет получения урона)
     pPawn->m_bTakesDamage = false;
 
-    // Таймер на отключение иммунитета
     g_pImmunityTimers[iSlot] = g_pUtils->CreateTimer(duration, [iSlot]() -> float {
         CCSPlayerController* pController = CCSPlayerController::FromSlot(iSlot);
-        if (pController)
+        if (pController && g_pPlayers->IsConnected(iSlot))
         {
             CCSPlayerPawn* pPawn = pController->m_hPlayerPawn();
             if (pPawn)
-            {
-                // Отключаем иммунитет (разрешаем урон)
                 pPawn->m_bTakesDamage = true;
-            }
         }
         g_pImmunityTimers[iSlot] = nullptr;
         return -1.0f;
@@ -113,6 +105,52 @@ int GetOnlinePlayers()
     return iCount;
 }
 
+void SetupPlayerRespawn(int iSlot)
+{
+    if (!g_pVIPCore->VIP_IsClientVIP(iSlot))
+        return;
+
+    if (g_pRespawnTimers[iSlot])
+    {
+        g_pUtils->RemoveTimer(g_pRespawnTimers[iSlot]);
+        g_pRespawnTimers[iSlot] = nullptr;
+    }
+    if (g_pAutoRespawnTimers[iSlot])
+    {
+        g_pUtils->RemoveTimer(g_pAutoRespawnTimers[iSlot]);
+        g_pAutoRespawnTimers[iSlot] = nullptr;
+    }
+
+    g_isActive[iSlot] = false;
+    g_AisActive[iSlot] = g_pVIPCore->VIP_GetClientFeatureBool(iSlot, "AutoRespawn");
+
+    float fNoRespawnDelay = g_pVIPCore->VIP_GetClientFeatureFloat(iSlot, "NoRespawnDelay");
+    if (fNoRespawnDelay > 0)
+    {
+        g_pRespawnTimers[iSlot] = g_pUtils->CreateTimer(fNoRespawnDelay, [iSlot]() -> float {
+            g_isActive[iSlot] = false;
+            g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("RespawnIsNoLongerAvailable"));
+            g_pRespawnTimers[iSlot] = nullptr;
+            return -1.0f;
+        });
+    }
+    else
+    {
+        g_isActive[iSlot] = true;
+    }
+
+    float fNoAutoRespawnDelay = g_pVIPCore->VIP_GetClientFeatureFloat(iSlot, "NoAutoRespawnDelay");
+    if (fNoAutoRespawnDelay > 0 && g_pVIPCore->VIP_GetClientFeatureBool(iSlot, "AutoRespawn"))
+    {
+        g_pAutoRespawnTimers[iSlot] = g_pUtils->CreateTimer(fNoAutoRespawnDelay, [iSlot]() -> float {
+            g_AisActive[iSlot] = false;
+            g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("AutoRespawnIsNoLongerAvailable"));
+            g_pAutoRespawnTimers[iSlot] = nullptr;
+            return -1.0f;
+        });
+    }
+}
+
 bool OnRespawnCommand(int iSlot, const char* szContent)
 {
     if (!g_pVIPCore->VIP_IsClientVIP(iSlot))
@@ -122,13 +160,13 @@ bool OnRespawnCommand(int iSlot, const char* szContent)
     if (iCount <= 0)
         return false;
 
-    if (g_pRespawnTimers[iSlot] == nullptr && !g_isActive[iSlot])
+    if (!g_isActive[iSlot])
     {
         g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("RespawnIsNotAvailable"));
         return false;
     }
 
-    if (iCount <= g_iRespawns[iSlot] && iCount != 0) // iCount == 0 означает бесконечные респавны
+    if (iCount > 0 && g_iRespawns[iSlot] >= iCount)
     {
         g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("LimitRespawn"));
         return false;
@@ -151,27 +189,19 @@ bool OnRespawnCommand(int iSlot, const char* szContent)
         return false;
     }
 
-    if (!g_isActive[iSlot])
-    {
-        g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("RespawnIsNotAvailable"));
-        return false;
-    }
-
     if (GetOnlinePlayers() < g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "RespawnAccessMinPlayers"))
     {
         g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("NotEnoughOnlinePlayersForRespawn"));
         return false;
     }
 
-    // Проверка баланса команд
     int iOpponentTeam = (iTeam == 2) ? 3 : 2;
-    if (GetTeamTotalPlayers(iTeam) > GetTeamTotalPlayers(iOpponentTeam))
+    if (GetTeamTotalPlayers(iTeam) >= GetTeamTotalPlayers(iOpponentTeam))
     {
         g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("TeamBalanceError"));
         return false;
     }
 
-    // Проверка клатча (в команде должно быть больше 1 живого)
     if (GetTeamAlivePlayers(iTeam) <= 1)
     {
         g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("ClutchModeNoRespawn"));
@@ -183,10 +213,13 @@ bool OnRespawnCommand(int iSlot, const char* szContent)
 
     g_pPlayers->Respawn(iSlot);
 
-    int iHealth = g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "HPAfterRespawn");
-    pPlayerPawn->m_iHealth() = iHealth;
+    CCSPlayerPawn* pNewPawn = pPlayerController->m_hPlayerPawn();
+    if (pNewPawn)
+    {
+        int iHealth = g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "HPAfterRespawn");
+        pNewPawn->m_iHealth() = iHealth;
+    }
 
-    // Иммунитет после респавна
     GiveImmunity(iSlot, 5.0f);
 
     return false;
@@ -195,23 +228,6 @@ bool OnRespawnCommand(int iSlot, const char* szContent)
 bool OnSelect(int iSlot, const char* szFeature)
 {
     return OnRespawnCommand(iSlot, "");
-}
-
-bool vip_respawn::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
-{
-    PLUGIN_SAVEVARS();
-    GET_V_IFACE_ANY(GetEngineFactory, g_pSchemaSystem, ISchemaSystem, SCHEMASYSTEM_INTERFACE_VERSION);
-    GET_V_IFACE_CURRENT(GetEngineFactory, engine, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
-    GET_V_IFACE_CURRENT(GetServerFactory, g_pSource2Server, ISource2Server, SOURCE2SERVER_INTERFACE_VERSION);
-    g_SMAPI->AddListener( this, this );
-    return true;
-}
-
-bool vip_respawn::Unload(char *error, size_t maxlen)
-{
-    delete g_pVIPCore;
-    delete g_pUtils;
-    return true;
 }
 
 void OnRoundStart(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
@@ -240,36 +256,7 @@ void OnRoundStart(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
         }
 
         g_iRespawns[iSlot] = 0;
-
-        if (!g_pVIPCore->VIP_IsClientVIP(iSlot))
-            continue; // дальше настройки только для VIP
-
-        if (g_pVIPCore->VIP_GetClientFeatureBool(iSlot, "AutoRespawn"))
-        {
-            g_AisActive[iSlot] = true;
-        }
-
-        float fNoRespawnDelay = g_pVIPCore->VIP_GetClientFeatureFloat(iSlot, "NoRespawnDelay");
-        if (fNoRespawnDelay > 0)
-        {
-            g_pRespawnTimers[iSlot] = g_pUtils->CreateTimer(fNoRespawnDelay, [iSlot]() -> float {
-                g_isActive[iSlot] = false;
-                g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("RespawnIsNoLongerAvailable"));
-                g_pRespawnTimers[iSlot] = nullptr;
-                return -1.0f;
-            });
-        }
-
-        float fNoAutoRespawnDelay = g_pVIPCore->VIP_GetClientFeatureFloat(iSlot, "NoAutoRespawnDelay");
-        if (fNoAutoRespawnDelay > 0 && g_pVIPCore->VIP_GetClientFeatureBool(iSlot, "AutoRespawn"))
-        {
-            g_pAutoRespawnTimers[iSlot] = g_pUtils->CreateTimer(fNoAutoRespawnDelay, [iSlot]() -> float {
-                g_AisActive[iSlot] = false;
-                g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("AutoRespawnIsNoLongerAvailable"));
-                g_pAutoRespawnTimers[iSlot] = nullptr;
-                return -1.0f;
-            });
-        }
+        SetupPlayerRespawn(iSlot);
     }
 }
 
@@ -305,9 +292,11 @@ void OnRoundEnd(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
 
 void OnPlayerDeath(const char* sName, IGameEvent* event, bool bDontBroadcast)
 {
-    int iSlot = event->GetInt("userid");
-    if (iSlot < 0 || iSlot >= 64)
-        return;
+    CCSPlayerController* pController = event->GetPlayerController("userid");
+    if (!pController) return;
+
+    int iSlot = pController->GetPlayerSlot();
+    if (iSlot < 0 || iSlot >= 64) return;
 
     if (!g_pVIPCore->VIP_IsClientVIP(iSlot))
         return;
@@ -318,42 +307,34 @@ void OnPlayerDeath(const char* sName, IGameEvent* event, bool bDontBroadcast)
 
     bool bRespawnTimeExpired = (g_pRespawnTimers[iSlot] == nullptr && !g_isActive[iSlot]);
 
-    // --- Автореспавн ---
     if (g_pVIPCore->VIP_GetClientFeatureBool(iSlot, "AutoRespawn") && g_iRespawns[iSlot] < iCount && g_AisActive[iSlot])
     {
         if (GetOnlinePlayers() < g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "AutoRespawnMinPlayers"))
         {
             g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("NotEnoughOnlinePlayersForAutoRespawn"));
-            // не возвращаемся, чтобы дать шанс ручному респавну
         }
         else
         {
-            CCSPlayerController* pController = CCSPlayerController::FromSlot(iSlot);
-            if (pController)
+            int iTeam = pController->m_iTeamNum();
+            int iOpponentTeam = (iTeam == 2) ? 3 : 2;
+
+            if (GetTeamTotalPlayers(iTeam) >= GetTeamTotalPlayers(iOpponentTeam))
             {
-                int iTeam = pController->m_iTeamNum();
-                int iOpponentTeam = (iTeam == 2) ? 3 : 2;
+                g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("TeamBalanceError"));
+                return;
+            }
 
-                // Проверка баланса
-                if (GetTeamTotalPlayers(iTeam) > GetTeamTotalPlayers(iOpponentTeam))
-                {
-                    g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("TeamBalanceError"));
-                    return;
-                }
-
-                // Проверка клатча
-                if (GetTeamAlivePlayers(iTeam) <= 1)
-                {
-                    g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("ClutchModeNoRespawn"));
-                    return;
-                }
+            if (GetTeamAlivePlayers(iTeam) <= 1)
+            {
+                g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("ClutchModeNoRespawn"));
+                return;
             }
 
             float fRespawnDelay = g_pVIPCore->VIP_GetClientFeatureFloat(iSlot, "AutoRespawnDelay");
             if (fRespawnDelay > 0)
             {
                 g_pAutoRespawnDelayTimers[iSlot] = g_pUtils->CreateTimer(fRespawnDelay, [iSlot, iCount]() -> float {
-                    if (iSlot < 0 || iSlot >= 64) return -1.0f;
+                    if (!g_pPlayers->IsConnected(iSlot)) return -1.0f;
 
                     CCSPlayerController* pController = CCSPlayerController::FromSlot(iSlot);
                     if (!pController) return -1.0f;
@@ -361,11 +342,10 @@ void OnPlayerDeath(const char* sName, IGameEvent* event, bool bDontBroadcast)
                     CCSPlayerPawn* pPlayerPawn = pController->m_hPlayerPawn();
                     if (!pPlayerPawn || pPlayerPawn->IsAlive()) return -1.0f;
 
-                    // Повторная проверка условий перед респавном
                     int iTeam = pController->m_iTeamNum();
                     int iOpponentTeam = (iTeam == 2) ? 3 : 2;
 
-                    if (GetTeamTotalPlayers(iTeam) > GetTeamTotalPlayers(iOpponentTeam))
+                    if (GetTeamTotalPlayers(iTeam) >= GetTeamTotalPlayers(iOpponentTeam))
                     {
                         g_pUtils->PrintToChat(iSlot, "%s %s", g_pVIPCore->VIP_GetTranslate("Prefix"), g_pVIPCore->VIP_GetTranslate("TeamBalanceError"));
                         return -1.0f;
@@ -385,46 +365,50 @@ void OnPlayerDeath(const char* sName, IGameEvent* event, bool bDontBroadcast)
 
                     g_iRespawns[iSlot]++;
                     g_pPlayers->Respawn(iSlot);
-                    int iHealth = g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "HPAfterAutoRespawn");
-                    pPlayerPawn->m_iHealth() = iHealth;
 
-                    // Иммунитет после автореспавна
+                    CCSPlayerPawn* pNewPawn = pController->m_hPlayerPawn();
+                    if (pNewPawn)
+                    {
+                        int iHealth = g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "HPAfterAutoRespawn");
+                        pNewPawn->m_iHealth() = iHealth;
+                    }
+
                     GiveImmunity(iSlot, 5.0f);
 
                     const char* prefix = g_pVIPCore->VIP_GetTranslate("Prefix");
                     const char* fmt   = g_pVIPCore->VIP_GetTranslate("RespawnRemaining");
                     char szResp[128];
-                    snprintf(szResp, sizeof(szResp), fmt, iCount - g_iRespawns[iSlot]);
+                    int remaining = (iCount > 0) ? iCount - g_iRespawns[iSlot] : 0;
+                    snprintf(szResp, sizeof(szResp), fmt, remaining);
                     g_pUtils->PrintToChat(iSlot, "%s %s", prefix, szResp);
                     return -1.0f;
                 });
             }
             else
             {
-                CCSPlayerController* pController = CCSPlayerController::FromSlot(iSlot);
-                if (!pController) return;
-                CCSPlayerPawn* pPlayerPawn = pController->m_hPlayerPawn();
-                if (!pPlayerPawn || pPlayerPawn->IsAlive()) return;
-
                 g_iRespawns[iSlot]++;
                 g_pPlayers->Respawn(iSlot);
-                int iHealth = g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "HPAfterAutoRespawn");
-                pPlayerPawn->m_iHealth() = iHealth;
 
-                // Иммунитет после автореспавна
+                CCSPlayerPawn* pNewPawn = pController->m_hPlayerPawn();
+                if (pNewPawn)
+                {
+                    int iHealth = g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "HPAfterAutoRespawn");
+                    pNewPawn->m_iHealth() = iHealth;
+                }
+
                 GiveImmunity(iSlot, 5.0f);
 
                 const char* prefix = g_pVIPCore->VIP_GetTranslate("Prefix");
                 const char* fmt   = g_pVIPCore->VIP_GetTranslate("RespawnRemaining");
                 char szResp[128];
-                snprintf(szResp, sizeof(szResp), fmt, iCount - g_iRespawns[iSlot]);
+                int remaining = (iCount > 0) ? iCount - g_iRespawns[iSlot] : 0;
+                snprintf(szResp, sizeof(szResp), fmt, remaining);
                 g_pUtils->PrintToChat(iSlot, "%s %s", prefix, szResp);
             }
-            return; // автореспавн сработал, выходим
+            return;
         }
     }
 
-    // --- Ручной респавн (если автореспавн не сработал) ---
     if (g_iRespawns[iSlot] < iCount && !bRespawnTimeExpired)
     {
         if (GetOnlinePlayers() < g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "RespawnMinPlayers"))
@@ -437,9 +421,9 @@ void OnPlayerDeath(const char* sName, IGameEvent* event, bool bDontBroadcast)
             if (fRespawnDelay > 0)
             {
                 g_pRespawnDelayTimers[iSlot] = g_pUtils->CreateTimer(fRespawnDelay, [iSlot, iCount]() -> float {
-                    if (iSlot < 0 || iSlot >= 64) return -1.0f;
+                    if (!g_pPlayers->IsConnected(iSlot)) return -1.0f;
 
-                    if (g_pRespawnTimers[iSlot] == nullptr && !g_isActive[iSlot]) {
+                    if (g_pRespawnTimers[iSlot] != nullptr || !g_isActive[iSlot]) {
                         return -1.0f;
                     }
 
@@ -447,23 +431,87 @@ void OnPlayerDeath(const char* sName, IGameEvent* event, bool bDontBroadcast)
                     const char* prefix = g_pVIPCore->VIP_GetTranslate("Prefix");
                     const char* fmt   = g_pVIPCore->VIP_GetTranslate("RespawnAvailable");
                     char szResp[128];
-                    snprintf(szResp, sizeof(szResp), fmt, iCount - g_iRespawns[iSlot]);
+                    int remaining = (iCount > 0) ? iCount - g_iRespawns[iSlot] : 0;
+                    snprintf(szResp, sizeof(szResp), fmt, remaining);
                     g_pUtils->PrintToChat(iSlot, "%s %s", prefix, szResp);
                     return -1.0f;
                 });
             }
             else
             {
-                if (g_pRespawnTimers[iSlot] != nullptr || g_isActive[iSlot]) {
-                    g_isActive[iSlot] = true;
+                if (g_isActive[iSlot])
+                {
                     const char* prefix = g_pVIPCore->VIP_GetTranslate("Prefix");
                     const char* fmt   = g_pVIPCore->VIP_GetTranslate("RespawnAvailable");
                     char szResp[128];
-                    snprintf(szResp, sizeof(szResp), fmt, iCount - g_iRespawns[iSlot]);
+                    int remaining = (iCount > 0) ? iCount - g_iRespawns[iSlot] : 0;
+                    snprintf(szResp, sizeof(szResp), fmt, remaining);
                     g_pUtils->PrintToChat(iSlot, "%s %s", prefix, szResp);
                 }
             }
         }
+    }
+}
+
+void OnPlayerSpawn(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
+{
+    CCSPlayerController* pController = pEvent->GetPlayerController("userid");
+    if (!pController) return;
+    int iSlot = pController->GetPlayerSlot();
+    if (iSlot < 0 || iSlot >= 64) return;
+
+    if (!g_pPlayers->IsConnected(iSlot)) return;
+
+    if (!g_pRespawnTimers[iSlot] && !g_pAutoRespawnTimers[iSlot] && !g_pRespawnDelayTimers[iSlot] && !g_pAutoRespawnDelayTimers[iSlot])
+    {
+        SetupPlayerRespawn(iSlot);
+    }
+}
+
+void OnPlayerDisconnect(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
+{
+    CCSPlayerController* pController = pEvent->GetPlayerController("userid");
+    if (!pController) return;
+    int iSlot = pController->GetPlayerSlot();
+    if (iSlot < 0 || iSlot >= 64) return;
+
+    if (g_pRespawnTimers[iSlot]) {
+        g_pUtils->RemoveTimer(g_pRespawnTimers[iSlot]);
+        g_pRespawnTimers[iSlot] = nullptr;
+    }
+    if (g_pAutoRespawnTimers[iSlot]) {
+        g_pUtils->RemoveTimer(g_pAutoRespawnTimers[iSlot]);
+        g_pAutoRespawnTimers[iSlot] = nullptr;
+    }
+    if (g_pRespawnDelayTimers[iSlot]) {
+        g_pUtils->RemoveTimer(g_pRespawnDelayTimers[iSlot]);
+        g_pRespawnDelayTimers[iSlot] = nullptr;
+    }
+    if (g_pAutoRespawnDelayTimers[iSlot]) {
+        g_pUtils->RemoveTimer(g_pAutoRespawnDelayTimers[iSlot]);
+        g_pAutoRespawnDelayTimers[iSlot] = nullptr;
+    }
+    if (g_pImmunityTimers[iSlot]) {
+        g_pUtils->RemoveTimer(g_pImmunityTimers[iSlot]);
+        g_pImmunityTimers[iSlot] = nullptr;
+    }
+
+    g_iRespawns[iSlot] = 0;
+    g_isActive[iSlot] = false;
+    g_AisActive[iSlot] = false;
+}
+
+void OnPlayerTeam(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
+{
+    CCSPlayerController* pController = pEvent->GetPlayerController("userid");
+    if (!pController) return;
+    int iSlot = pController->GetPlayerSlot();
+    if (iSlot < 0 || iSlot >= 64) return;
+
+    if (g_iRespawns[iSlot] != 0)
+    {
+        g_iRespawns[iSlot] = 0;
+        SetupPlayerRespawn(iSlot);
     }
 }
 
@@ -479,15 +527,36 @@ void VIP_OnVIPLoaded()
     g_pUtils->HookEvent(g_PLID, "round_start", OnRoundStart);
     g_pUtils->HookEvent(g_PLID, "round_end", OnRoundEnd);
     g_pUtils->HookEvent(g_PLID, "player_death", OnPlayerDeath);
+    g_pUtils->HookEvent(g_PLID, "player_spawn", OnPlayerSpawn);
+    g_pUtils->HookEvent(g_PLID, "player_disconnect", OnPlayerDisconnect);
+    g_pUtils->HookEvent(g_PLID, "player_team", OnPlayerTeam);
     g_pUtils->RegCommand(g_PLID, {"mm_respawn", "sm_respawn", "respawn"}, {"!respawn", "respawn"}, OnRespawnCommand);
 }
 
 std::string OnDisplay(int iSlot, const char* szFeature)
 {
     int iCount = g_pVIPCore->VIP_GetClientFeatureInt(iSlot, "Respawn");
+    int remaining = (iCount > 0 && iCount - g_iRespawns[iSlot] >= 0) ? iCount - g_iRespawns[iSlot] : 0;
     char szDisplay[128];
-    g_SMAPI->Format(szDisplay, sizeof(szDisplay), "%s [%i]", g_pVIPCore->VIP_GetTranslate(szFeature), iCount - g_iRespawns[iSlot]);
+    g_SMAPI->Format(szDisplay, sizeof(szDisplay), "%s [%i]", g_pVIPCore->VIP_GetTranslate(szFeature), remaining);
     return std::string(szDisplay);
+}
+
+bool vip_respawn::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
+{
+    PLUGIN_SAVEVARS();
+    GET_V_IFACE_ANY(GetEngineFactory, g_pSchemaSystem, ISchemaSystem, SCHEMASYSTEM_INTERFACE_VERSION);
+    GET_V_IFACE_CURRENT(GetEngineFactory, engine, IVEngineServer2, SOURCE2ENGINETOSERVER_INTERFACE_VERSION);
+    GET_V_IFACE_CURRENT(GetServerFactory, g_pSource2Server, ISource2Server, SOURCE2SERVER_INTERFACE_VERSION);
+    g_SMAPI->AddListener( this, this );
+    return true;
+}
+
+bool vip_respawn::Unload(char *error, size_t maxlen)
+{
+    delete g_pVIPCore;
+    delete g_pUtils;
+    return true;
 }
 
 void vip_respawn::AllPluginsLoaded()
