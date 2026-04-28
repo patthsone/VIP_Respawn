@@ -292,7 +292,7 @@ void OnRoundEnd(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
 
 void OnPlayerDeath(const char* sName, IGameEvent* event, bool bDontBroadcast)
 {
-    CCSPlayerController* pController = event->GetPlayerController("userid");
+    CCSPlayerController* pController = (CCSPlayerController*)event->GetPlayerController("userid");
     if (!pController) return;
 
     int iSlot = pController->GetPlayerSlot();
@@ -455,7 +455,7 @@ void OnPlayerDeath(const char* sName, IGameEvent* event, bool bDontBroadcast)
 
 void OnPlayerSpawn(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
 {
-    CCSPlayerController* pController = pEvent->GetPlayerController("userid");
+    CCSPlayerController* pController = (CCSPlayerController*)pEvent->GetPlayerController("userid");
     if (!pController) return;
     int iSlot = pController->GetPlayerSlot();
     if (iSlot < 0 || iSlot >= 64) return;
@@ -470,7 +470,7 @@ void OnPlayerSpawn(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
 
 void OnPlayerDisconnect(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
 {
-    CCSPlayerController* pController = pEvent->GetPlayerController("userid");
+    CCSPlayerController* pController = (CCSPlayerController*)pEvent->GetPlayerController("userid");
     if (!pController) return;
     int iSlot = pController->GetPlayerSlot();
     if (iSlot < 0 || iSlot >= 64) return;
@@ -503,7 +503,7 @@ void OnPlayerDisconnect(const char* szName, IGameEvent* pEvent, bool bDontBroadc
 
 void OnPlayerTeam(const char* szName, IGameEvent* pEvent, bool bDontBroadcast)
 {
-    CCSPlayerController* pController = pEvent->GetPlayerController("userid");
+    CCSPlayerController* pController = (CCSPlayerController*)pEvent->GetPlayerController("userid");
     if (!pController) return;
     int iSlot = pController->GetPlayerSlot();
     if (iSlot < 0 || iSlot >= 64) return;
